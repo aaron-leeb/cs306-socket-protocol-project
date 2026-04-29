@@ -20,6 +20,7 @@ class Game:
 
     def end_game(self):
         self.state = "finished"
+        
 
     def make_move(self, player, position):
         if self.state != "in_progress":
