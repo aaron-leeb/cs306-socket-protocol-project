@@ -4,7 +4,7 @@ sys.path.append("..")
 from protocol import *
 
 class Client:
-    def __init__(self, host="127.0.0.1", port=5000):
+    def __init__(self, host="127.0.0.1", port=DEFAULT_TCP_PORT):
         self.host = host
         self.port = port
         self.reader = None
@@ -140,12 +140,12 @@ class Client:
 
 async def main():
     host = input("Enter server IP (default 127.0.0.1): ").strip() or "127.0.0.1"
-    port_input = input("Enter server port (default 5000): ").strip()
+    port_input = input(f"Enter server port (default {DEFAULT_TCP_PORT}): ").strip()
     try:
-        port = int(port_input) if port_input else 5000
+        port = int(port_input) if port_input else DEFAULT_TCP_PORT
     except ValueError:
-        print("Invalid port, using 5000.")
-        port = 5000
+        print(f"Invalid port, using {DEFAULT_TCP_PORT}.")
+        port = DEFAULT_TCP_PORT
     name = input("Enter your player name: ")
     client = Client(host=host, port=port)
     await client.connect(name)

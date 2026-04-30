@@ -5,7 +5,7 @@ from protocol import *
 from game import Game
 
 class Server:
-    def __init__(self, host="0.0.0.0", port=5000):
+    def __init__(self, host="0.0.0.0", port=DEFAULT_TCP_PORT):
         self.host = host
         self.port = port
         self.server = None
