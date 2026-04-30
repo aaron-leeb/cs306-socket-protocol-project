@@ -13,7 +13,7 @@ def discover_server(timeout=2):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(timeout)
     try:
-        sock.sendto(b"DISCOVER_SERVER", ("<broadcast>", DEFAULT_UDP_PORT))
+        sock.sendto(MSG_TYPE_DISCOVER.encode(), ("<broadcast>", DEFAULT_UDP_PORT))
         data, _ = sock.recvfrom(1024)
         ip, port = data.decode().split(":")
         return ip, int(port)

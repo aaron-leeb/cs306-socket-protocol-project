@@ -1,6 +1,6 @@
 import socket
 import threading
-from protocol import DEFAULT_UDP_PORT, DEFAULT_TCP_PORT
+from protocol import DEFAULT_UDP_PORT, DEFAULT_TCP_PORT, MSG_TYPE_DISCOVER
 
 def udp_discovery_server(tcp_port=DEFAULT_TCP_PORT, udp_port=DEFAULT_UDP_PORT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,10 +20,13 @@ def udp_discovery_server(tcp_port=DEFAULT_TCP_PORT, udp_port=DEFAULT_UDP_PORT):
         return ip
     while True:
         data, addr = sock.recvfrom(1024)
-        if data == b"DISCOVER_SERVER":
+        print(f"[DISCOVERY] Received UDP packet from {addr}: {data}")
+        if data == MSG_TYPE_DISCOVER.encode():
+            print(f"[DISCOVERY] Valid discovery request from {addr}")
             # Reply with LAN IP and TCP port
             ip = get_lan_ip()
             response = f"{ip}:{tcp_port}"
+            print(f"[DISCOVERY] Sending response '{response}' to {addr}")
             sock.sendto(response.encode(), addr)
 
 # To use: import and start in a thread from server.py
