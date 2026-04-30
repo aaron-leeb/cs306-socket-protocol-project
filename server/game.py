@@ -1,3 +1,31 @@
+class GameError(Exception):
+    """Base exception for game-related protocol errors."""
+
+
+class GameStateError(GameError):
+    pass
+
+
+class GameFullError(GameError):
+    pass
+
+
+class DuplicatePlayerError(GameError):
+    pass
+
+
+class NotYourTurnError(GameError):
+    pass
+
+
+class InvalidCoordinatesError(GameError):
+    pass
+
+
+class CellOccupiedError(GameError):
+    pass
+
+
 class Game:
     def __init__(self, game_id):
         self.game_id = game_id
@@ -8,12 +36,16 @@ class Game:
         self.winner = None
 
     def add_player(self, player):
-        if self.state == "waiting":
-            self.players.append(player)
-            if len(self.players) == 2:
-                self.start_game()
-        else:
-            raise Exception("Cannot join a game that has already started.")
+        if self.state != "waiting":
+            raise GameStateError("Cannot join a game that has already started.")
+        if player in self.players:
+            raise DuplicatePlayerError("You have already joined this game.")
+        if len(self.players) >= 2:
+            raise GameFullError("Game is full.")
+
+        self.players.append(player)
+        if len(self.players) == 2:
+            self.start_game()
 
     def start_game(self):
         self.state = "in_progress"
@@ -23,13 +55,22 @@ class Game:
         
 
     def make_move(self, player, position):
-        if self.state != "in_progress":
-            raise Exception("Game is not in progress.")
+        if self.state == "finished":
+            raise GameStateError("Game is already over.")
+        if self.state != "in_progress" or len(self.players) < 2:
+            raise GameStateError("Game is not in progress.")
+        if player not in self.players:
+            raise GameStateError("Player is not part of the current game.")
         if player != self.players[self.turn % len(self.players)]:
-            raise Exception("It's not this player's turn.")
+            raise NotYourTurnError("It's not your turn.")
+
         row, col = position
+        if not isinstance(row, int) or not isinstance(col, int):
+            raise InvalidCoordinatesError("Row and column must be integers.")
+        if row not in range(3) or col not in range(3):
+            raise InvalidCoordinatesError("Row and column must be between 0 and 2.")
         if self.board[row][col] != 0:
-            raise Exception("Position already taken.")
+            raise CellOccupiedError("Position already taken.")
 
         self.board[row][col] = 1 if player == self.players[0] else -1
         self.turn += 1
@@ -37,6 +78,9 @@ class Game:
         winner = self.check_win_condition()
         if winner != 0:
             self.winner = self.players[0] if winner == 1 else self.players[1]
+            self.end_game()
+        elif self.turn == 9:
+            self.winner = None
             self.end_game()
     
     def check_win_condition(self):
@@ -64,5 +108,3 @@ class Game:
 
         return 0  # No winner yet
     
-
-g = Game("game1")

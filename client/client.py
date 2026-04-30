@@ -1,6 +1,7 @@
 import asyncio
+from pathlib import Path
 import sys
-sys.path.append("..")
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from protocol import *
 
 class Client:
@@ -9,23 +10,52 @@ class Client:
         self.port = port
         self.reader = None
         self.writer = None
+        self.connected = False
+        self.my_symbol = None
+        self.my_turn = False
 
     async def connect(self, name):
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+        try:
+            self.reader, self.writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=5,
+            )
+        except asyncio.TimeoutError:
+            print(f"[CLIENT] Timed out connecting to {self.host}:{self.port}.")
+            return False
+        except ConnectionRefusedError:
+            print(f"[CLIENT] Connection refused. Make sure the server is running on {self.host}:{self.port}.")
+            return False
+        except OSError as e:
+            print(f"[CLIENT] Could not connect to {self.host}:{self.port}: {e}")
+            return False
+
         print(f"[CLIENT] Connected to server at {self.host}:{self.port}\n")
         self.name = name
+        self.connected = True
         # Send connect message as handshake
         connect_msg = {"type": MSG_TYPE_CONNECT, "name": name}
         print(f"Welcome, {name}!")
         print(f"Type /help for options")
-        self.writer.write(encode_message(connect_msg))
-        await self.writer.drain()
+        return await self.send_message(connect_msg)
+
+    async def send_message(self, message):
+        if not self.writer or self.writer.is_closing():
+            print("[CLIENT] Not connected to the server.")
+            self.connected = False
+            return False
+        try:
+            self.writer.write(encode_message(message))
+            await self.writer.drain()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            print(f"[CLIENT] Lost connection while sending data: {e}")
+            self.connected = False
+            return False
 
     async def listen(self):
         try:
-            self.my_symbol = None
-            self.my_turn = False
-            while True:
+            while self.connected:
                 data = await self.reader.readline()
                 if not data:
                     print("[CLIENT] Server closed the connection.")
@@ -41,9 +71,9 @@ class Client:
                     print(f"{msg} (type /help to see options)")
                 elif msg_type == "start":
                     self.my_symbol = message.get("symbol")
-                    your_turn = bool(message.get("your_turn", False))
+                    self.my_turn = bool(message.get("your_turn", False))
                     print(f"Game started. You are {self.my_symbol}.")
-                    if your_turn:
+                    if self.my_turn:
                         print("It is your turn.")
                 elif msg_type == "board":
                     board = message.get("board")
@@ -64,18 +94,25 @@ class Client:
                     print(f"[error] {message.get('code')}: {message.get('message')}")
                 elif msg_type == "game_over":
                     print(f"Game over: {message.get('result')}")
+                    self.my_turn = False
                     print("Type /start to play again.")
                 elif msg_type == "opponent_disconnected":
+                    self.my_turn = False
+                    self.my_symbol = None
                     print(message.get("message", "Opponent disconnected"))
-                    break
+                    print("Type /start to begin a new game.")
                 else:
                     print(f"[CLIENT] Unknown message type: {msg_type}")
+        except ConnectionResetError:
+            print("[CLIENT] Connection was reset by the server.")
         except Exception as e:
             print(f"[CLIENT] Error receiving message: {e}")
+        finally:
+            self.connected = False
 
 
     async def unified_input_loop(self):
-        while True:
+        while self.connected:
             raw = await asyncio.to_thread(input, "")
             s = raw.strip()
             if s == "/help":
@@ -89,20 +126,20 @@ class Client:
                 continue
             if s == "/start":
                 msg = {"type": MSG_TYPE_START_GAME}
-                self.writer.write(encode_message(msg))
-                await self.writer.drain()
+                if not await self.send_message(msg):
+                    break
                 continue
             if s == "/join":
                 msg = {"type": MSG_TYPE_JOIN_GAME}
-                self.writer.write(encode_message(msg))
-                await self.writer.drain()
+                if not await self.send_message(msg):
+                    break
                 continue
             if s.startswith("/chat"):
                 chat_msg = s[5:].strip()
                 if chat_msg:
                     msg = {"type": MSG_TYPE_CHAT, "message": chat_msg}
-                    self.writer.write(encode_message(msg))
-                    await self.writer.drain()
+                    if not await self.send_message(msg):
+                        break
                 else:
                     print("Usage: /chat your message")
                 continue
@@ -121,11 +158,12 @@ class Client:
                     print("Row and col must be integers.")
                     continue
                 move_msg = {"type": MSG_TYPE_MOVE, "row": row, "col": col}
-                self.writer.write(encode_message(move_msg))
-                await self.writer.drain()
+                if not await self.send_message(move_msg):
+                    break
                 continue
             if s == "/exit":
                 print("Exiting game.")
+                self.connected = False
                 if self.writer:
                     self.writer.close()
                     await self.writer.wait_closed()
@@ -148,7 +186,9 @@ async def main():
         port = DEFAULT_TCP_PORT
     name = input("Enter your player name: ")
     client = Client(host=host, port=port)
-    await client.connect(name)
+    connected = await client.connect(name)
+    if not connected:
+        return
     await client.main_loop(name)
 
 if __name__ == "__main__":
