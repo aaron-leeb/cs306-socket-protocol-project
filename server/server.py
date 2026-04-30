@@ -1,6 +1,8 @@
+
 import asyncio
 from pathlib import Path
 import sys
+import threading
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from protocol import *
 from game import (
@@ -12,6 +14,7 @@ from game import (
     InvalidCoordinatesError,
     NotYourTurnError,
 )
+from discovery import udp_discovery_server
 
 class Server:
     def __init__(self, host="0.0.0.0", port=DEFAULT_TCP_PORT):
@@ -22,6 +25,9 @@ class Server:
         self.game = None
         self.player_map = {}  # writer -> player_name
         self.writer_map = {}  # player_name -> writer
+
+        # Start UDP discovery server in a background thread
+        threading.Thread(target=udp_discovery_server, args=(self.port, DEFAULT_UDP_PORT), daemon=True).start()
 
     async def broadcast_message(self, message):
         # Broadcast a message to all connected clients
@@ -101,10 +107,6 @@ class Server:
                         for w in tuple(self.clients):
                             w.write(announcement)
                             await w.drain()
-                        await self.broadcast_message({
-                            "type": MSG_TYPE_WAITING,
-                            "message": "A new game has been started. Type /join to join the game."
-                        })
                     continue
 
                 # Handle /join command (join the waiting game)

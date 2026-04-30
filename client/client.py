@@ -1,13 +1,43 @@
+
 import asyncio
+import socket
 from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from protocol import *
 
+
+def discover_server(timeout=2):
+    """Send UDP broadcast to discover the server's IP and port."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(b"DISCOVER_SERVER", ("<broadcast>", DEFAULT_UDP_PORT))
+        data, _ = sock.recvfrom(1024)
+        ip, port = data.decode().split(":")
+        return ip, int(port)
+    except Exception:
+        return None, None
+    finally:
+        sock.close()
+
 class Client:
-    def __init__(self, host="127.0.0.1", port=DEFAULT_TCP_PORT):
-        self.host = host
-        self.port = port
+    def __init__(self, host=None, port=None):
+        # If host/port not provided, try to discover
+        if host is None or port is None:
+            ip, p = discover_server()
+            if ip and p:
+                print(f"[CLIENT] Discovered server at {ip}:{p}")
+                self.host = ip
+                self.port = p
+            else:
+                print("[CLIENT] Could not discover server. Defaulting to 127.0.0.1:{DEFAULT_TCP_PORT}")
+                self.host = "127.0.0.1"
+                self.port = DEFAULT_TCP_PORT
+        else:
+            self.host = host
+            self.port = port
         self.reader = None
         self.writer = None
         self.connected = False
@@ -177,15 +207,21 @@ class Client:
         )
 
 async def main():
-    host = input("Enter server IP (default 127.0.0.1): ").strip() or "127.0.0.1"
-    port_input = input(f"Enter server port (default {DEFAULT_TCP_PORT}): ").strip()
-    try:
-        port = int(port_input) if port_input else DEFAULT_TCP_PORT
-    except ValueError:
-        print(f"Invalid port, using {DEFAULT_TCP_PORT}.")
-        port = DEFAULT_TCP_PORT
+    # Try UDP discovery first
+    ip, port = discover_server()
+    if ip and port:
+        print(f"[CLIENT] Discovered server at {ip}:{port}")
+    else:
+        print("[CLIENT] Could not auto-discover server. Please enter manually.")
+        ip = input("Enter server IP (default 127.0.0.1): ").strip() or "127.0.0.1"
+        port_input = input(f"Enter server port (default {DEFAULT_TCP_PORT}): ").strip()
+        try:
+            port = int(port_input) if port_input else DEFAULT_TCP_PORT
+        except ValueError:
+            print(f"Invalid port, using {DEFAULT_TCP_PORT}.")
+            port = DEFAULT_TCP_PORT
     name = input("Enter your player name: ")
-    client = Client(host=host, port=port)
+    client = Client(host=ip, port=port)
     connected = await client.connect(name)
     if not connected:
         return
