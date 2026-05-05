@@ -240,6 +240,18 @@ class Server:
             if writer in self.player_map:
                 del self.player_map[writer]
 
+            if player_name:
+                announcement = encode_message({
+                    "type": MSG_TYPE_ANNOUNCE,
+                    "message": f"{player_name} has disconnected from the server. Players connected: {len(self.player_map)}"
+                })
+                for w in tuple(self.clients):
+                    try:
+                        w.write(announcement)
+                        await w.drain()
+                    except Exception:
+                        pass
+
 
             # Remove player from game and notify opponent (only if a game exists)
             opponent_writer = None

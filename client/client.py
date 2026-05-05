@@ -7,6 +7,11 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from protocol import *
 
 
+CONNECT_TIMEOUT = 5
+IO_TIMEOUT = 30
+CONNECT_RETRY_DELAYS = (1, 2)
+
+
 def discover_server(timeout=2):
     """Send UDP broadcast to discover the server's IP and port."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -44,21 +49,41 @@ class Client:
         self.my_symbol = None
         self.my_turn = False
 
+    async def close_connection(self):
+        self.connected = False
+        if self.writer and not self.writer.is_closing():
+            self.writer.close()
+            try:
+                await self.writer.wait_closed()
+            except OSError:
+                pass
+
     async def connect(self, name):
-        try:
-            self.reader, self.writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=5,
-            )
-        except asyncio.TimeoutError:
-            print(f"[CLIENT] Timed out connecting to {self.host}:{self.port}.")
-            return False
-        except ConnectionRefusedError:
-            print(f"[CLIENT] Connection refused. Make sure the server is running on {self.host}:{self.port}.")
-            return False
-        except OSError as e:
-            print(f"[CLIENT] Could not connect to {self.host}:{self.port}: {e}")
-            return False
+        attempts = len(CONNECT_RETRY_DELAYS) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                self.reader, self.writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.host, self.port),
+                    timeout=CONNECT_TIMEOUT,
+                )
+                break
+            except asyncio.TimeoutError:
+                print(f"[CLIENT] Timed out connecting to {self.host}:{self.port}.")
+            except ConnectionRefusedError:
+                print(
+                    f"[CLIENT] Connection refused for {self.host}:{self.port}. "
+                    "The server may not be running, or the IP/port may be wrong."
+                )
+            except OSError as e:
+                print(f"[CLIENT] Could not connect to {self.host}:{self.port}: {e}")
+                return False
+
+            if attempt == attempts:
+                return False
+
+            delay = CONNECT_RETRY_DELAYS[attempt - 1]
+            print(f"[CLIENT] Retrying in {delay} second(s)...")
+            await asyncio.sleep(delay)
 
         print(f"[CLIENT] Connected to server at {self.host}:{self.port}\n")
         self.name = name
@@ -76,19 +101,24 @@ class Client:
             return False
         try:
             self.writer.write(encode_message(message))
-            await self.writer.drain()
+            await asyncio.wait_for(self.writer.drain(), timeout=IO_TIMEOUT)
             return True
+        except asyncio.TimeoutError:
+            print("[CLIENT] Timed out while sending data to the server.")
+            await self.close_connection()
+            return False
         except (BrokenPipeError, ConnectionResetError, OSError) as e:
             print(f"[CLIENT] Lost connection while sending data: {e}")
-            self.connected = False
+            await self.close_connection()
             return False
 
     async def listen(self):
         try:
             while self.connected:
-                data = await self.reader.readline()
+                data = await asyncio.wait_for(self.reader.readline(), timeout=IO_TIMEOUT)
                 if not data:
-                    print("[CLIENT] Server closed the connection.")
+                    if self.connected:
+                        print("[CLIENT] Server closed the connection.")
                     break
                 try:
                     message = decode_message(data)
@@ -133,12 +163,14 @@ class Client:
                     print("Type /start to begin a new game.")
                 else:
                     print(f"[CLIENT] Unknown message type: {msg_type}")
+        except asyncio.TimeoutError:
+            print("[CLIENT] Timed out waiting for data from the server.")
         except ConnectionResetError:
             print("[CLIENT] Connection was reset by the server.")
         except Exception as e:
             print(f"[CLIENT] Error receiving message: {e}")
         finally:
-            self.connected = False
+            await self.close_connection()
 
 
     async def unified_input_loop(self):
@@ -193,10 +225,7 @@ class Client:
                 continue
             if s == "/exit":
                 print("Exiting game.")
-                self.connected = False
-                if self.writer:
-                    self.writer.close()
-                    await self.writer.wait_closed()
+                await self.close_connection()
                 break
             print("Unknown command. Type /help for options.")
 
